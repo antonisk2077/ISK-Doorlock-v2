@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin - ISK Doorlock</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <div class="title">Admin Panel</div>
+        <div class="sub">Superadmin: kelola chip, pintu, monitoring kesehatan, dan performa sistem.</div>
+      </div>
+      <div class="row">
+        <button class="btn small" onclick="location.href='/control'">Control</button>
+        <button id="logoutBtn" class="btn small">Logout</button>
+      </div>
+    </header>
+
+    <div class="admin-layout">
+      <!-- Sidebar -->
+      <div class="admin-sidebar">
+        <button class="admin-sidebar-item active" data-page="door-manager">Door Manager</button>
+        <button class="admin-sidebar-item" data-page="door-health">Door Health</button>
+        <button class="admin-sidebar-item" data-page="door-performance">Door Performance</button>
+      </div>
+
+      <!-- Content Area -->
+      <div class="admin-content">
+
+        <!-- DOOR MANAGER PAGE -->
+        <div id="door-manager" class="admin-page active">
+          <!-- Chip Management -->
+          <div class="card">
+            <div class="room">Kelola Chip</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+              <div>
+                <div class="note">Nomor Chip</div>
+                <input id="chip_no" placeholder="contoh: CHIP001" />
+              </div>
+              <div>
+                <div class="note">MAC Address</div>
+                <input id="chip_mac" placeholder="84:CC:A8:82:43:D0" />
+              </div>
+              <button id="addChipBtn" class="btn primary">Tambah Chip</button>
+            </div>
+
+            <table class="table" id="chipsTable">
+              <thead><tr><th>ID</th><th>Nomor Chip</th><th>MAC Address</th><th>Aksi</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="note">Chip adalah kombinasi nomor chip dan MAC address yang akan diassign ke pintu.</div>
+          </div>
+
+          <!-- Door Management -->
+          <div class="card" style="margin-top:14px">
+            <div class="room">Kelola Pintu</div>
+            <div style="display:grid;grid-template-columns:120px 1fr 1fr auto;gap:10px;align-items:end">
+              <div>
+                <div class="note">Lantai</div>
+                <select id="floor">
+                  <option>1</option><option>2</option><option>3</option><option>4</option>
+                </select>
+              </div>
+              <div>
+                <div class="note">Nomor kamar</div>
+                <input id="room_no" placeholder="contoh: 201" />
+              </div>
+              <div>
+                <div class="note">Nomor Chip</div>
+                <select id="chip_select">
+                  <option value="">-- Pilih Chip --</option>
+                </select>
+              </div>
+              <button id="addDoorBtn" class="btn primary">Tambah Pintu</button>
+            </div>
+
+            <table class="table" id="doorsTable">
+              <thead><tr><th>ID</th><th>Lantai</th><th>Kamar</th><th>Nomor Chip</th><th>MAC Address</th><th>Aksi</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="note">Pilih nomor chip dari dropdown untuk mengassign chip ke pintu. Gunakan tombol "Hapus" untuk menghapus kamar/pintu.</div>
+          </div>
+        </div>
+
+        <!-- DOOR HEALTH PAGE -->
+        <div id="door-health" class="admin-page">
+          <div class="card">
+            <div class="room">Health Status (PING Monitoring)</div>
+            <div class="note">PING diharapkan setiap 12 jam. Status unhealthy jika lebih dari 12 jam 4 menit tidak ada PING.</div>
+            <table class="table" id="healthTable">
+              <thead><tr><th>Lantai</th><th>Kamar</th><th>MAC</th><th>Last ping</th><th>Age (min)</th><th>Status</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="card" style="margin-top:14px">
+            <div class="room">Performa Harian (Downtime hari ini, menit)</div>
+            <table class="table" id="downTable">
+              <thead><tr><th>Lantai</th><th>Kamar</th><th>MAC</th><th>Downtime (min)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="note">Downtime dihitung dari gap PING &gt; 724 menit (12 jam + 4 menit toleransi).</div>
+          </div>
+        </div>
+
+        <!-- DOOR PERFORMANCE PAGE -->
+        <div id="door-performance" class="admin-page">
+          <div class="card">
+            <div class="room">Jumlah PING yang Diterima</div>
+            <div class="note">Tracking jumlah PING yang diterima per kamar dalam 1 hari dan 7 hari terakhir.</div>
+            <table class="table" id="pingCountTable">
+              <thead><tr><th>Lantai</th><th>Kamar</th><th>Nomor Chip</th><th>MAC</th><th>Sum PING 1 Day</th><th>Sum PING 7 Days</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function api(url, opts){
+      const res = await fetch(url, opts);
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    async function mustSuperadmin(){
+      const me = await api('/api/me');
+      if (!me.user) location.href = '/';
+      if (me.user.role !== 'superadmin') {
+        alert('Hanya superadmin yang boleh akses admin page.');
+        location.href = '/control';
+      }
+      return me.user;
+    }
+
+    // ===== SIDEBAR NAVIGATION =====
+    document.querySelectorAll('.admin-sidebar-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const page = item.getAttribute('data-page');
+
+        // Update active state
+        document.querySelectorAll('.admin-sidebar-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+
+        // Show selected page
+        document.querySelectorAll('.admin-page').forEach(p => p.classList.remove('active'));
+        document.getElementById(page).classList.add('active');
+      });
+    });
+
+    // ===== CHIP MANAGEMENT =====
+    async function loadChips(){
+      const rows = await api('/api/chips');
+      const tb = document.querySelector('#chipsTable tbody');
+      tb.innerHTML = '';
+
+      // Update chip dropdown
+      const select = document.getElementById('chip_select');
+      select.innerHTML = '<option value="">-- Pilih Chip --</option>';
+
+      rows.forEach(c => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${c.id}</td>
+          <td>${c.chip_no}</td>
+          <td><code>${c.mac}</code></td>
+          <td>
+            <button class="btn small danger" data-del="${c.id}">Hapus</button>
+          </td>`;
+        tb.appendChild(tr);
+
+        // Add to dropdown
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = `${c.chip_no} (${c.mac})`;
+        select.appendChild(opt);
+      });
+
+      tb.onclick = async (e) => {
+        const del = e.target.getAttribute('data-del');
+        if (del) {
+          if (!confirm('Hapus chip ID ' + del + '?')) return;
+          await api('/api/chips/' + del, { method:'DELETE' });
+          await loadChips();
+          await loadDoors();
+        }
+      };
+    }
+
+    // ===== DOOR MANAGEMENT =====
+    async function loadDoors(){
+      const rows = await api('/api/doors');
+      const tb = document.querySelector('#doorsTable tbody');
+      tb.innerHTML = '';
+      rows.forEach(d => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${d.id}</td>
+          <td>${d.floor}</td>
+          <td>${d.room_no}</td>
+          <td>${d.chip_no || '-'}</td>
+          <td><code>${d.mac || '-'}</code></td>
+          <td><button class="btn small danger" data-del="${d.id}">Hapus</button></td>`;
+        tb.appendChild(tr);
+      });
+
+      // Handle delete door
+      tb.onclick = async (e) => {
+        const delId = e.target.getAttribute('data-del');
+        if (delId) {
+          if (!confirm('Hapus kamar/pintu ID ' + delId + '?')) return;
+
+          await api('/api/doors/' + delId, { method: 'DELETE' });
+          await loadDoors();
+        }
+      };
+    }
+
+    // ===== HEALTH MONITORING =====
+    async function loadHealth(){
+      const rows = await api('/api/health');
+      const tb = document.querySelector('#healthTable tbody');
+      tb.innerHTML = '';
+      rows.forEach(x => {
+        const tr = document.createElement('tr');
+        const last = x.last_ping_at ? new Date(x.last_ping_at).toLocaleString() : '-';
+        const age = (x.ping_age_min == null) ? '-' : x.ping_age_min.toFixed(1);
+        tr.innerHTML = `
+          <td>${x.floor}</td>
+          <td>${x.room_no}</td>
+          <td><code>${x.mac || '-'}</code></td>
+          <td>${last}</td>
+          <td>${age}</td>
+          <td>${x.healthy ? 'OK' : 'OFF'}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+
+    async function loadDowntime(){
+      const rows = await api('/api/metrics/downtime-today');
+      const tb = document.querySelector('#downTable tbody');
+      tb.innerHTML = '';
+      rows.forEach(x => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${x.floor}</td>
+          <td>${x.room_no}</td>
+          <td><code>${x.mac || '-'}</code></td>
+          <td>${x.downtime_min_today}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+
+    // ===== PERFORMANCE MONITORING =====
+    async function loadPingCount(){
+      const rows = await api('/api/metrics/ping-count');
+      const tb = document.querySelector('#pingCountTable tbody');
+      tb.innerHTML = '';
+      rows.forEach(x => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${x.floor}</td>
+          <td>${x.room_no}</td>
+          <td>${x.chip_no || '-'}</td>
+          <td><code>${x.mac || '-'}</code></td>
+          <td>${x.ping_count_1d}</td>
+          <td>${x.ping_count_7d}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+
+    async function refreshAll(){
+      await Promise.all([loadChips(), loadDoors(), loadHealth(), loadDowntime(), loadPingCount()]);
+    }
+
+    (async function main(){
+      await mustSuperadmin();
+
+      document.getElementById('logoutBtn').onclick = async () => {
+        await fetch('/api/logout', { method:'POST' });
+        location.href = '/';
+      };
+
+      // Add chip
+      document.getElementById('addChipBtn').onclick = async () => {
+        const chip_no = document.getElementById('chip_no').value.trim();
+        const mac = document.getElementById('chip_mac').value.trim();
+        if (!chip_no || !mac) return alert('Nomor chip & MAC wajib');
+
+        await api('/api/chips', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ chip_no, mac })
+        });
+
+        document.getElementById('chip_no').value = '';
+        document.getElementById('chip_mac').value = '';
+        await loadChips();
+      };
+
+      // Add door
+      document.getElementById('addDoorBtn').onclick = async () => {
+        const floor = parseInt(document.getElementById('floor').value, 10);
+        const room_no = document.getElementById('room_no').value.trim();
+        const chip_id = document.getElementById('chip_select').value;
+        if (!room_no) return alert('Nomor kamar wajib');
+
+        await api('/api/doors', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ floor, room_no, chip_id: chip_id || null })
+        });
+
+        document.getElementById('room_no').value = '';
+        document.getElementById('chip_select').value = '';
+        await loadDoors();
+      };
+
+      await refreshAll();
+
+      // auto-refresh monitoring every 15 seconds
+      setInterval(() => {
+        loadHealth();
+        loadDowntime();
+        loadPingCount();
+      }, 15000);
+    })();
+  </script>
+</body>
+</html>

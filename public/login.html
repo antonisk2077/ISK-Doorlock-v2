@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Login - ISK Doorlock</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body class="login-page">
+  <div class="container login-container">
+    <header>
+      <div>
+        <div class="title">ISK Doorlock</div>
+        <div class="sub">
+          Login untuk akses panel kontrol. Admin = kontrol saja. Superadmin = kontrol + edit data pintu + monitoring.
+        </div>
+      </div>
+    </header>
+
+    <div class="login-center">
+      <div class="card login-card">
+        <div class="room">Login</div>
+
+        <form id="f" class="login-form">
+          <input id="u" placeholder="username" autocomplete="username" required />
+          <input id="p" placeholder="password" type="password" autocomplete="current-password" required />
+
+          <button id="btn" class="btn primary" type="submit">Masuk</button>
+          <pre id="err" class="note login-error"></pre>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('f');
+    const errEl = document.getElementById('err');
+    const btn = document.getElementById('btn');
+    const u = document.getElementById('u');
+    const p = document.getElementById('p');
+
+    u.focus();
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.textContent = '';
+
+      const username = u.value.trim();
+      const password = p.value;
+
+      if (!username || !password) {
+        errEl.textContent = 'username dan password wajib diisi';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Masuk...';
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          errEl.textContent = data.error || 'login gagal';
+          return;
+        }
+
+        location.href = '/control';
+      } catch (e) {
+        errEl.textContent = 'Error: ' + (e.message || e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Masuk';
+      }
+    });
+  </script>
+</body>
+</html>

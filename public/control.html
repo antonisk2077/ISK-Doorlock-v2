@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Control - ISK Doorlock</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <div class="title">ISK Doorlock</div>
+        <div class="sub">
+          Panel kontrol 4 lantai (11 pintu per lantai). Nomor kamar & MAC read-only (diatur dari halaman Admin oleh superadmin).
+          Schedule pakai tanggal + jam buka + jam hingga, disimpan di DB & dieksekusi otomatis oleh server.
+        </div>
+      </div>
+      <div class="row">
+        <span id="rolePill" class="pill">role: -</span>
+        <button id="adminBtn" class="btn small" style="display:none">Admin</button>
+        <button id="logoutBtn" class="btn small">Logout</button>
+      </div>
+    </header>
+
+    <div class="row" style="margin-bottom:12px">
+      <span id="mqttPill" class="pill bad">SSE: offline</span>
+      <span id="lastAck" class="pill">ACK terakhir: -</span>
+      <span id="lastPing" class="pill">PING terakhir: -</span>
+    </div>
+
+    <div id="root"></div>
+
+    <div class="note" style="margin-top:14px">
+      Topic: <code>jatinegara/lantai{1..4}/control</code> · status: <code>.../status</code> · health: <code>.../health</code>
+    </div>
+  </div>
+
+  <script>
+    const FLOORS = [1,2,3,4];
+
+    async function api(url, opts){
+      const res = await fetch(url, opts);
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    async function mustLogin(){
+      const me = await api('/api/me');
+      if (!me.user) location.href = '/';
+      return me.user;
+    }
+
+    async function loadDoors(){
+      return api('/api/doors');
+    }
+
+    function groupByFloor(doors){
+      const g = {1:[],2:[],3:[],4:[]};
+      doors.forEach(d => (g[d.floor] ||= []).push(d));
+      Object.values(g).forEach(arr => arr.sort((a,b)=>a.room_no.localeCompare(b.room_no)));
+      return g;
+    }
+
+    async function sendCommand(doorId, command){
+      await api('/api/send', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ doorId, command })
+      });
+    }
+
+    async function upsertSchedule(doorId, schedule_date, open_time, close_time){
+      await api('/api/schedules/upsert', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ doorId, schedule_date, open_time, close_time, enabled:true })
+      });
+    }
+
+    function makeCard(door){
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.doorId = door.id;
+
+      card.innerHTML = `
+        <div class="cardhead">
+          <div>
+            <div class="room">Kamar ${door.room_no}</div>
+            <div class="mac">${door.mac}</div>
+          </div>
+          <div class="statusrow" style="flex-direction:column;align-items:flex-end">
+            <span class="pill" data-status>SWITCH: -</span>
+            <span class="pill" data-ack>ACK: -</span>
+          </div>
+        </div>
+
+        <div class="btnrow">
+          <button class="btn primary" data-cmd="buka">Buka</button>
+          <button class="btn danger" data-cmd="kunci">Kunci</button>
+        </div>
+        <div class="btnrow">
+          <button class="btn" data-cmd="switch_on">Switch ON</button>
+          <button class="btn" data-cmd="switch_off">Switch OFF</button>
+        </div>
+
+        <div style="border-top:1px dashed rgba(31,41,55,.9);padding-top:10px">
+          <div class="sub" style="margin-bottom:8px">Schedule (tanggal + jam)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <div class="note">Tanggal</div>
+              <input type="date" data-date />
+            </div>
+            <div>
+              <div class="note">Buka dari</div>
+              <input type="time" data-open />
+            </div>
+            <div>
+              <div class="note">Hingga</div>
+              <input type="time" data-close />
+            </div>
+            <div style="display:flex;align-items:flex-end">
+              <button class="btn small" data-save>Set jadwal</button>
+            </div>
+          </div>
+          <div class="note" data-sum style="margin-top:8px">-</div>
+        </div>
+      `;
+
+      card.addEventListener('click', async (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+
+        const ack = card.querySelector('[data-ack]');
+        const status = card.querySelector('[data-status]');
+
+        // command buttons
+        const cmd = b.getAttribute('data-cmd');
+        if (cmd) {
+          try {
+            ack.textContent = 'ACK: menunggu ' + cmd;
+            await sendCommand(door.id, cmd);
+          } catch (err) {
+            alert(err.message);
+          }
+          return;
+        }
+
+        // schedule save
+        if (b.hasAttribute('data-save')) {
+          const date = card.querySelector('[data-date]').value;
+          const open = card.querySelector('[data-open]').value;
+          const close = card.querySelector('[data-close]').value;
+          const sum = card.querySelector('[data-sum]');
+          if (!date || !open || !close) {
+            sum.textContent = 'Jadwal belum lengkap';
+            return;
+          }
+          try {
+            await upsertSchedule(door.id, date, open, close);
+            sum.textContent = `Jadwal: ${date} · buka ${open} → kunci ${close}`;
+          } catch (err) {
+            alert(err.message);
+          }
+        }
+      });
+
+      return card;
+    }
+
+    function render(doorsByFloor){
+      const root = document.getElementById('root');
+      root.innerHTML = '';
+
+      FLOORS.forEach(f => {
+        const sec = document.createElement('div');
+        sec.className = 'section';
+        sec.innerHTML = `<h3>Lantai ${f}</h3><div class="grid" id="grid-${f}"></div>`;
+        root.appendChild(sec);
+
+        const grid = sec.querySelector(`#grid-${f}`);
+        (doorsByFloor[f] || []).forEach(d => grid.appendChild(makeCard(d)));
+      });
+    }
+
+    function initSSE(){
+      const pill = document.getElementById('mqttPill');
+      const lastAck = document.getElementById('lastAck');
+      const lastPing = document.getElementById('lastPing');
+
+      const es = new EventSource('/api/events');
+
+      es.onopen = () => {
+        pill.classList.remove('bad');
+        pill.classList.add('ok');
+        pill.textContent = 'SSE: online';
+      };
+      es.onerror = () => {
+        pill.classList.remove('ok');
+        pill.classList.add('bad');
+        pill.textContent = 'SSE: offline';
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'ack' && data.doorId) {
+            const card = document.querySelector(`.card[data-door-id="${data.doorId}"]`);
+            if (card) {
+              card.querySelector('[data-ack]').textContent = 'ACK: ' + data.action;
+              const st = card.querySelector('[data-status]');
+              if (data.action === 'switch_on') st.textContent = 'SWITCH: ON';
+              if (data.action === 'switch_off') st.textContent = 'SWITCH: OFF';
+            }
+            const t = new Date(data.timestamp).toTimeString().slice(0,8);
+            lastAck.textContent = `ACK terakhir: ${data.action} (${data.mac}) ${t}`;
+          }
+
+          if (data.type === 'ping' && data.doorId) {
+            const t = new Date(data.timestamp).toTimeString().slice(0,8);
+            lastPing.textContent = `PING terakhir: (${data.mac}) ${t}`;
+          }
+
+        } catch(e) {}
+      };
+    }
+
+    (async function main(){
+      const user = await mustLogin();
+      document.getElementById('rolePill').textContent = 'role: ' + user.role;
+
+      const adminBtn = document.getElementById('adminBtn');
+      if (user.role === 'superadmin') {
+        adminBtn.style.display = 'inline-block';
+        adminBtn.onclick = () => location.href = '/admin';
+      }
+
+      document.getElementById('logoutBtn').onclick = async () => {
+        await fetch('/api/logout', { method:'POST' });
+        location.href = '/';
+      };
+
+      const doors = await loadDoors();
+      render(groupByFloor(doors));
+      initSSE();
+    })();
+  </script>
+</body>
+</html>

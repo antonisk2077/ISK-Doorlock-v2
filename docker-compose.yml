@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: isk-doorlock-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: isk_doorlock
+      POSTGRES_USER: isk
+      POSTGRES_PASSWORD: iskpass
+      TZ: Asia/Jakarta
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
+  isk-doorlock:
+    build: .
+    container_name: isk-doorlock
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Asia/Jakarta
+
+      # PostgreSQL
+      DATABASE_URL: "postgres://isk:iskpass@db:5432/isk_doorlock"
+      SESSION_SECRET: "change-this-secret"
+
+      # MQTT
+      MQTT_HOST: "mqtt://gatevans.com"
+      MQTT_PORT: 1883
+      MQTT_USERNAME: "meltedbrain"
+      MQTT_PASSWORD: "meltedbrain911"
+
+      # Floors
+      FLOORS: "1,2,3,4"
+
+      # Topics base (fixed format: jatinegara/lantai{n}/{control|status|health})
+      MQTT_TOPIC_PREFIX: "jatinegara"
+
+      # Scheduler interval (seconds)
+      SCHEDULER_TICK_SECONDS: 30
+
+volumes:
+  pgdata:
