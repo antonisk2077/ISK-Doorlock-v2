@@ -11,7 +11,7 @@
     <header>
       <div>
         <div class="title">Admin Panel</div>
-        <div class="sub">Superadmin: kelola chip, pintu, monitoring kesehatan, dan performa sistem.</div>
+        <div class="sub">Login sebagai: <span id="loginAs">-</span></div>
       </div>
       <div class="row">
         <button class="btn small" onclick="location.href='/control'">Control</button>
@@ -25,6 +25,7 @@
         <button class="admin-sidebar-item active" data-page="door-manager">Door Manager</button>
         <button class="admin-sidebar-item" data-page="door-health">Door Health</button>
         <button class="admin-sidebar-item" data-page="door-performance">Door Performance</button>
+        <button class="admin-sidebar-item" data-page="cctv">CCTV</button>
       </div>
 
       <!-- Content Area -->
@@ -115,6 +116,22 @@
               <thead><tr><th>Lantai</th><th>Kamar</th><th>Nomor Chip</th><th>MAC</th><th>Sum PING 1 Day</th><th>Sum PING 7 Days</th></tr></thead>
               <tbody></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- CCTV PAGE -->
+        <div id="cctv" class="admin-page">
+          <div class="card">
+            <div class="room">CCTV Monitoring</div>
+            <div class="row cctv-toolbar">
+              <label class="note" for="cctvBranch">Cabang</label>
+              <select id="cctvBranch">
+                <option value="kemayoran">Kemayoran</option>
+                <option value="jatinegara">Jatinegara</option>
+              </select>
+            </div>
+            <div class="note">Tambahkan URL kamera saat siap. Tampilan ini akan menampilkan feed per zona.</div>
+            <div id="cctvGrid" class="cctv-grid"></div>
           </div>
         </div>
 
@@ -281,7 +298,8 @@
     }
 
     (async function main(){
-      await mustSuperadmin();
+      const user = await mustSuperadmin();
+      document.getElementById('loginAs').textContent = user.username;
 
       document.getElementById('logoutBtn').onclick = async () => {
         await fetch('/api/logout', { method:'POST' });
@@ -331,6 +349,43 @@
         loadDowntime();
         loadPingCount();
       }, 15000);
+
+      // ===== CCTV MOCK LAYOUT =====
+      const branches = {
+        kemayoran: Array.from({ length: 12 }, (_, i) => ({
+          name: `Kemayoran ${String(i + 1).padStart(2, '0')}`,
+          zone: `Zona ${i + 1}`
+        })),
+        jatinegara: Array.from({ length: 12 }, (_, i) => ({
+          name: `Jatinegara ${String(i + 1).padStart(2, '0')}`,
+          zone: `Zona ${i + 1}`
+        }))
+      };
+
+      function renderCctvGrid(branchKey){
+        const grid = document.getElementById('cctvGrid');
+        const cams = branches[branchKey] || [];
+        grid.innerHTML = '';
+        cams.forEach((cam) => {
+          const card = document.createElement('div');
+          card.className = 'cctv-card';
+          card.innerHTML = `
+            <div class="cctv-header">
+              <span>${cam.name}</span>
+              <span class="pill ok">online</span>
+            </div>
+            <div class="cctv-feed">Feed placeholder</div>
+            <div class="note">${cam.zone}</div>
+          `;
+          grid.appendChild(card);
+        });
+      }
+
+      const cctvBranch = document.getElementById('cctvBranch');
+      cctvBranch.addEventListener('change', (e) => {
+        renderCctvGrid(e.target.value);
+      });
+      renderCctvGrid(cctvBranch.value);
     })();
   </script>
 </body>
